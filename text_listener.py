@@ -59,6 +59,15 @@ class Popup(QtWidgets.QWidget):
                 color: #1a73e8;
                 margin-bottom: 4px;
             }
+            QPushButton {
+                background-color: #f0f0f0;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-size: 10pt;
+            }
+            QPushButton:hover {
+                background-color: #ddd;
+            }
         """)
 
         # Set fixed maximum width for the container
@@ -67,8 +76,8 @@ class Popup(QtWidgets.QWidget):
         
         # Layout
         layout = QtWidgets.QVBoxLayout(container)
-        layout.setContentsMargins(12, 12, 12, 12)  # Add some padding
-        layout.setSpacing(8)  # Add some spacing between widgets
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
         
         title_label = QtWidgets.QLabel("Summary")
         title_label.setObjectName("title")
@@ -89,19 +98,25 @@ class Popup(QtWidgets.QWidget):
         text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         text_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         
-        # Add widgets to layouts
         content_layout.addWidget(text_label)
         scroll.setWidget(content)
         
-        layout.addWidget(title_label)
-        layout.addWidget(scroll, 1)  # Make the scroll area take remaining space
+        # --- NEW BUTTONS ---
+        button_layout = QtWidgets.QHBoxLayout()
+        btn_bullet = QtWidgets.QPushButton("Bulletin")
+        btn_text = QtWidgets.QPushButton("Text")
+        button_layout.addWidget(btn_bullet)
+        button_layout.addWidget(btn_text)
+        # -------------------
         
-        # Outer layout for transparent background
+        layout.addWidget(title_label)
+        layout.addWidget(scroll, 1)
+        layout.addLayout(button_layout)  # Add buttons below scroll area
+        
         outer_layout = QtWidgets.QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.addWidget(container)
         
-        # Set size policy and adjust size
         self.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.adjustSize()
 
@@ -116,9 +131,8 @@ class Popup(QtWidgets.QWidget):
         self.fade_anim.setEndValue(1)
         self.fade_anim.start()
 
+
 # ------------------ Worker to run in separate thread ------------------
-# This new class is a QObject that performs the Gemini API call.
-# It lives in a separate thread so the GUI doesn't freeze.
 class GeminiSummarizerWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal(str, QPoint)  # Signal to emit when done
 
@@ -135,7 +149,6 @@ class GeminiSummarizerWorker(QtCore.QObject):
 
 
 # ------------------ Event Dispatcher ------------------
-# This class now manages the QThread and the worker.
 class EventDispatcher(QtCore.QObject):
     show_popup_signal = QtCore.pyqtSignal(int, int)
 
@@ -147,11 +160,10 @@ class EventDispatcher(QtCore.QObject):
     def handle_show_popup(self, x, y):
         # 1. First, get the selected text from the clipboard
         pyautogui.hotkey('ctrl', 'c')
-        time.sleep(0.05)  # Give the system a moment to process the copy command
+        time.sleep(0.05)
         text = pyperclip.paste().strip()
 
         if not text:
-            # If no text is selected, just show a simple message
             display_text = "No text found in clipboard."
             if self.parent.popup:
                 self.parent.popup.close()
@@ -159,38 +171,31 @@ class EventDispatcher(QtCore.QObject):
             QtCore.QTimer.singleShot(3000, self.parent.popup.close)
             return
 
-        # 2. Close any existing popup and show a "loading" message immediately
         if self.parent.popup:
             self.parent.popup.close()
 
-        # Display a loading message while waiting for the summary
         self.parent.popup = Popup("Fetching summary...", QPoint(x + 10, y + 10))
 
-        # 3. Create a QThread and the worker object to handle the API call
+        # Create QThread for Gemini
         self.thread = QtCore.QThread()
         self.worker = GeminiSummarizerWorker(text, QPoint(x + 10, y + 10))
         self.worker.moveToThread(self.thread)
 
-        # 4. Connect signals to manage the thread and worker lifecycle
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.handle_summary_ready)
         self.worker.finished.connect(self.thread.quit)
         self.thread.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         
-        # 5. Start the thread
         self.thread.start()
 
     def handle_summary_ready(self, summary_text, position):
-        """This slot is called when the worker has finished."""
-        # Close the "loading" popup
         if self.parent.popup:
             self.parent.popup.close()
         
-        # Display the final summary
         display_text = f"{summary_text}"
         self.parent.popup = Popup(display_text, position)
-        QtCore.QTimer.singleShot(5000, self.parent.popup.close)  # Close after 5 seconds
+        QtCore.QTimer.singleShot(5000, self.parent.popup.close)
 
 
 # ------------------ Mouse Listener ------------------
@@ -205,8 +210,6 @@ class TextListener:
             self.dispatcher.show_popup_signal.emit(x, y)
 
     def start(self):
-        # We need to make sure QApplication is created before any widgets
-        # or signals are used. This is correctly placed.
         self.app = QtWidgets.QApplication(sys.argv)
         self.dispatcher = EventDispatcher(self)
 
@@ -214,11 +217,9 @@ class TextListener:
         self.mouse_listener.start()
 
         self.app.aboutToQuit.connect(self.cleanup)
-        # This starts the PyQt event loop, which is essential for processing signals and events.
         self.app.exec_()
 
     def cleanup(self):
-        # This ensures the pynput listener is stopped gracefully when the application exits.
         if hasattr(self, 'mouse_listener'):
             self.mouse_listener.stop()
             self.mouse_listener.join()
